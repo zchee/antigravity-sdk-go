@@ -19,8 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
-
+	"github.com/fswatcher/fswatcher"
 	"github.com/zchee/antigravity-sdk-go/agtypes"
 )
 
@@ -50,14 +49,14 @@ func Every(interval time.Duration, callback func(ctx context.Context, tc *Contex
 	}
 }
 
-// fsnotifyToKind maps an fsnotify operation to a FileChangeKind. Create maps to
-// added, Remove and Rename to deleted, and Write/Chmod (and anything else) to
-// modified — matching the watchfiles-derived semantics upstream relies on.
-func fsnotifyToKind(op fsnotify.Op) agtypes.FileChangeKind {
+// fswatcherToKind maps an fswatcher operation to a FileChangeKind. Create maps
+// to added, Remove and Rename to deleted, and Write/Chmod (and anything else)
+// to modified — matching the watchfiles-derived semantics upstream relies on.
+func fswatcherToKind(op fswatcher.Op) agtypes.FileChangeKind {
 	switch {
-	case op.Has(fsnotify.Create):
+	case op.Has(fswatcher.Create):
 		return agtypes.FileChangeAdded
-	case op.Has(fsnotify.Remove), op.Has(fsnotify.Rename):
+	case op.Has(fswatcher.Remove), op.Has(fswatcher.Rename):
 		return agtypes.FileChangeDeleted
 	default:
 		return agtypes.FileChangeModified
@@ -70,17 +69,17 @@ func fsnotifyToKind(op fsnotify.Op) agtypes.FileChangeKind {
 // runs until its context is cancelled.
 //
 // Unlike the upstream lazily-imported watchfiles dependency, file watching is
-// provided by fsnotify and is always available. fsnotify watches a directory's
-// direct entries; pass a directory to observe its children, or a file to
+// provided by fswatcher and is always available. The watcher observes the given
+// path's direct entries; pass a directory to observe its children, or a file to
 // observe that file.
 func OnFileChange(path string, callback func(ctx context.Context, tc *Context, changes []agtypes.FileChange) error) Trigger {
 	return func(ctx context.Context, tc *Context) error {
-		w, err := fsnotify.NewWatcher()
+		w, err := fswatcher.NewWatcher()
 		if err != nil {
 			return fmt.Errorf("trigger: create file watcher: %w", err)
 		}
 		defer w.Close()
-		if err := w.Add(path); err != nil {
+		if err := w.Add(path, fswatcher.All); err != nil {
 			return fmt.Errorf("trigger: watch %q: %w", path, err)
 		}
 		for {
@@ -92,7 +91,7 @@ func OnFileChange(path string, callback func(ctx context.Context, tc *Context, c
 					return nil
 				}
 				changes := []agtypes.FileChange{{
-					Kind: fsnotifyToKind(ev.Op),
+					Kind: fswatcherToKind(ev.Op),
 					Path: ev.Name,
 				}}
 				if err := callback(ctx, tc, changes); err != nil {
