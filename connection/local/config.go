@@ -46,6 +46,10 @@ type AgentConfig struct {
 	Model string
 	// APIKey is a shorthand for GeminiConfig.APIKey; setting both is an error.
 	APIKey string
+
+	// validated guards Validate against re-applying defaults (notably the
+	// workspace policy prepend) so it is idempotent.
+	validated bool
 }
 
 // DefaultAppDataDir is the default application data directory, expanded from
@@ -69,18 +73,44 @@ func DefaultAppDataDir() string {
 //     and the confirm-run-command default policy when none were set;
 //   - requires an absolute AppDataDir when one is given.
 //
+// Build returns a validated copy of the config, ready to drive an Agent. It is
+// a convenience wrapper around Validate that leaves the receiver untouched.
+//
 // Build returns a *connection.ValidationError on any conflict or invalid value.
 func (c *AgentConfig) Build() (*AgentConfig, error) {
 	out := *c
 	out.BaseAgentConfig = c.BaseAgentConfig // shared base copied by value
-
-	if err := out.applyShorthands(); err != nil {
-		return nil, err
-	}
-	if err := out.applyDefaultsAndPolicies(); err != nil {
+	if err := out.Validate(); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// Validate applies the local config's shorthands, defaults, and policy
+// prepending in place. It is idempotent: a second call is a no-op (it will not
+// re-prepend workspace policies). The Agent calls it during construction so a
+// config passed directly to New is fully configured.
+//
+// It mirrors the upstream Pydantic validators:
+//
+//   - applies the Model/APIKey shorthands to GeminiConfig (rejecting conflicts);
+//   - defaults Workspaces to the current directory and Capabilities to the
+//     upstream default;
+//   - prepends workspace-scoping policies (always, so file ops stay confined)
+//     and the confirm-run-command default policy when none were set;
+//   - requires an absolute AppDataDir when one is given.
+func (c *AgentConfig) Validate() error {
+	if c.validated {
+		return nil
+	}
+	if err := c.applyShorthands(); err != nil {
+		return err
+	}
+	if err := c.applyDefaultsAndPolicies(); err != nil {
+		return err
+	}
+	c.validated = true
+	return nil
 }
 
 // applyShorthands folds Model/APIKey into GeminiConfig, rejecting conflicts.
@@ -172,6 +202,9 @@ func (c *AgentConfig) Clone() connection.AgentConfig {
 		GeminiConfig:    c.GeminiConfig,
 		Model:           c.Model,
 		APIKey:          c.APIKey,
+		// Carry the validated flag so a clone of an already-validated config does
+		// not re-prepend workspace policies.
+		validated: c.validated,
 	}
 }
 

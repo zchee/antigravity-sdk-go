@@ -116,6 +116,12 @@ type FakeStrategy struct {
 	// FakeConnection.
 	Conn *FakeConnection
 
+	// ToolRunner and HookRunner capture the runners CreateStrategy received, so
+	// a test holding the shared strategy can assert the Agent wired them — even
+	// though the Agent operates on a clone of the config.
+	ToolRunner *tool.Runner
+	HookRunner *hook.Runner
+
 	Started bool
 	Closed  bool
 }
@@ -166,6 +172,8 @@ func (c *FakeConfig) CreateStrategy(tr *tool.Runner, hr *hook.Runner) (Connectio
 	if c.Strategy == nil {
 		c.Strategy = &FakeStrategy{}
 	}
+	c.Strategy.ToolRunner = tr
+	c.Strategy.HookRunner = hr
 	return c.Strategy, nil
 }
 

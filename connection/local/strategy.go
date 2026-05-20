@@ -251,7 +251,7 @@ func (s *Strategy) toolProtos() ([]*pb.Tool, error) {
 	out := make([]*pb.Tool, 0, len(names))
 	for _, name := range names {
 		schema, _ := s.cfg.ToolRunner.Schema(name)
-		t, err := toolProto(name, "", schema)
+		t, err := toolProto(name, s.cfg.ToolRunner.Description(name), schema)
 		if err != nil {
 			return nil, err
 		}
@@ -312,7 +312,10 @@ func (s *Strategy) systemInstructionsProto() *pb.SystemInstructions {
 // harnessSideTools builds the HarnessSideTools proto reflecting which builtin
 // tools are active per the capabilities config.
 func (s *Strategy) harnessSideTools() *pb.HarnessSideTools {
-	active := activeBuiltinTools(s.cfg.Capabilities)
+	active := make(map[agtypes.BuiltinTools]struct{})
+	for _, t := range s.cfg.Capabilities.ActiveBuiltinTools() {
+		active[t] = struct{}{}
+	}
 	has := func(t agtypes.BuiltinTools) bool { _, ok := active[t]; return ok }
 
 	subagentEnabled := s.cfg.Capabilities.EnableSubagents && has(agtypes.ToolStartSubagent)
@@ -331,29 +334,4 @@ func (s *Strategy) harnessSideTools() *pb.HarnessSideTools {
 			ModelName: protoString(s.cfg.Capabilities.ImageModel),
 		}.Build(),
 	}.Build()
-}
-
-// activeBuiltinTools resolves the active builtin tool set from enabled/disabled
-// lists: enabled is an allowlist; disabled is a denylist subtracted from all;
-// neither means all tools.
-func activeBuiltinTools(cfg agtypes.CapabilitiesConfig) map[agtypes.BuiltinTools]struct{} {
-	active := make(map[agtypes.BuiltinTools]struct{})
-	switch {
-	case cfg.EnabledTools != nil:
-		for _, t := range cfg.EnabledTools {
-			active[t] = struct{}{}
-		}
-	case cfg.DisabledTools != nil:
-		for _, t := range agtypes.AllTools() {
-			active[t] = struct{}{}
-		}
-		for _, t := range cfg.DisabledTools {
-			delete(active, t)
-		}
-	default:
-		for _, t := range agtypes.AllTools() {
-			active[t] = struct{}{}
-		}
-	}
-	return active
 }

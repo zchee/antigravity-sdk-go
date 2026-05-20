@@ -14,7 +14,10 @@
 
 package agtypes
 
-import "errors"
+import (
+	"errors"
+	"slices"
+)
 
 // Default model names.
 const (
@@ -166,6 +169,32 @@ func DefaultCapabilitiesConfig() CapabilitiesConfig {
 	return CapabilitiesConfig{
 		EnableSubagents: true,
 		ImageModel:      DefaultImageGenerationModel,
+	}
+}
+
+// ActiveBuiltinTools resolves the set of builtin tools the harness exposes for
+// this configuration: EnabledTools as an allowlist, DisabledTools as a denylist
+// subtracted from all tools, or all tools when neither is set. It is the
+// canonical resolution shared by the connection layer and the Agent's
+// safety-policy guard.
+func (c CapabilitiesConfig) ActiveBuiltinTools() []BuiltinTools {
+	switch {
+	case c.EnabledTools != nil:
+		return slices.Clone(c.EnabledTools)
+	case c.DisabledTools != nil:
+		disabled := make(map[BuiltinTools]struct{}, len(c.DisabledTools))
+		for _, t := range c.DisabledTools {
+			disabled[t] = struct{}{}
+		}
+		out := make([]BuiltinTools, 0, len(AllTools()))
+		for _, t := range AllTools() {
+			if _, off := disabled[t]; !off {
+				out = append(out, t)
+			}
+		}
+		return out
+	default:
+		return AllTools()
 	}
 }
 

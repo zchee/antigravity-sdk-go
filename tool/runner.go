@@ -32,20 +32,27 @@ import (
 // conversation-aware ToolContext retrieves it from ctx via FromContext.
 type Tool func(ctx context.Context, args map[string]any) (any, error)
 
-// ToolWithSchema pairs a Tool with an explicit JSON Schema describing its input
-// arguments. Connections use the schema when advertising the tool to the model.
+// ToolWithSchema pairs a Tool with its name, description, and an explicit JSON
+// Schema describing its input arguments. Connections use these when advertising
+// the tool to the model. It is the Go analog of the upstream ToolWithSchema,
+// which carried the callable's __name__ and __doc__.
 type ToolWithSchema struct {
+	// Name is the tool name the model invokes.
+	Name string
+	// Description is a human-readable description shown to the model.
+	Description string
 	// Fn is the tool implementation.
 	Fn Tool
 	// InputSchema is the JSON Schema for the tool's arguments.
 	InputSchema map[string]any
 }
 
-// registered is the internal record for one tool: its callable and optional
-// schema.
+// registered is the internal record for one tool: its callable, description,
+// and optional schema.
 type registered struct {
-	fn     Tool
-	schema map[string]any
+	fn          Tool
+	description string
+	schema      map[string]any
 }
 
 // Runner is a registry and executor for in-process tools. Tools are registered
@@ -89,10 +96,21 @@ func (r *Runner) Register(name string, fn Tool) error {
 	return r.register(name, registered{fn: fn})
 }
 
-// RegisterWithSchema adds a ToolWithSchema under name, retaining its input
-// schema. It returns an *ErrToolAlreadyRegistered if the name is already in use.
+// RegisterWithSchema adds a ToolWithSchema under name, retaining its
+// description and input schema. It returns an *ErrToolAlreadyRegistered if the
+// name is already in use.
 func (r *Runner) RegisterWithSchema(name string, t ToolWithSchema) error {
-	return r.register(name, registered{fn: t.Fn, schema: t.InputSchema})
+	return r.register(name, registered{fn: t.Fn, description: t.Description, schema: t.InputSchema})
+}
+
+// AddTool registers a ToolWithSchema under its own Name. It returns an
+// *ErrToolAlreadyRegistered if the name is already in use, or an error if Name
+// is empty.
+func (r *Runner) AddTool(t ToolWithSchema) error {
+	if t.Name == "" {
+		return fmt.Errorf("tool: ToolWithSchema has an empty Name")
+	}
+	return r.register(t.Name, registered{fn: t.Fn, description: t.Description, schema: t.InputSchema})
 }
 
 func (r *Runner) register(name string, rec registered) error {
@@ -138,6 +156,14 @@ func (r *Runner) Schema(name string) (map[string]any, bool) {
 		return nil, false
 	}
 	return maps.Clone(rec.schema), true
+}
+
+// Description returns the description registered for name, or "" if the tool
+// has no description or is not registered.
+func (r *Runner) Description(name string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.tools[name].description
 }
 
 // Execute runs the tool registered under name with args, injecting the active

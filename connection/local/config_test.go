@@ -93,6 +93,26 @@ func TestAgentConfigPrependsWorkspacePolicies(t *testing.T) {
 	}
 }
 
+// TestAgentConfigValidateIdempotent confirms Validate does not re-prepend the
+// workspace policies on a second call (the Agent may Validate a config the user
+// already built).
+func TestAgentConfigValidateIdempotent(t *testing.T) {
+	cfg := &local.AgentConfig{}
+	cfg.WorkspacesValue = []string{t.TempDir()}
+	cfg.PoliciesValue = []policy.Policy{policy.AllowAll()}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	after1 := len(cfg.Policies())
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if after2 := len(cfg.Policies()); after2 != after1 {
+		t.Errorf("policy count changed on second Validate: %d -> %d (not idempotent)", after1, after2)
+	}
+}
+
 func TestAgentConfigDefaultPolicies(t *testing.T) {
 	// With no explicit policies, ConfirmRunCommand is the default (and workspace
 	// policies prepend ahead of it since cwd is the default workspace).

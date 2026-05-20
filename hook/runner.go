@@ -62,6 +62,14 @@ func (r *Runner) HasHooks() bool {
 		len(r.onCompaction) > 0
 }
 
+// HasPreToolCallDecide reports whether any pre-tool-call decide hook is
+// registered. The Agent uses this as the escape hatch for its safety-policy
+// guard: a user who registered a decide hook is presumed to be gating tool
+// calls themselves.
+func (r *Runner) HasPreToolCallDecide() bool {
+	return len(r.preToolCallDecide) > 0
+}
+
 // ErrUnknownHook reports a hook value whose dynamic type is not one of the
 // concrete hook types.
 type ErrUnknownHook struct{ Hook Hook }

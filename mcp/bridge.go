@@ -128,6 +128,8 @@ func toolsFromSession(ctx context.Context, session *mcpsdk.ClientSession) ([]too
 			return nil, fmt.Errorf("mcp: tool %q input schema: %w", t.Name, err)
 		}
 		out = append(out, tool.ToolWithSchema{
+			Name:        t.Name,
+			Description: t.Description,
 			Fn:          callToolFunc(session, t.Name),
 			InputSchema: schema,
 		})

@@ -68,7 +68,19 @@ type AgentConfig interface {
 	// shallowly so the identity of user-provided callbacks is preserved (mirrors
 	// the upstream model_copy(deep=True) plus original-list snapshot).
 	Clone() AgentConfig
+
+	// Validate applies the config's defaults and validation rules in place,
+	// idempotently. The Agent calls it during construction so backends that
+	// derive state from user fields — for example LocalAgentConfig, which
+	// prepends workspace-scoping policies — are fully configured even when the
+	// caller passes the config directly. It returns a *ValidationError on
+	// invalid input. BaseAgentConfig provides a no-op default.
+	Validate() error
 }
+
+// Validate is the no-op default; backends that need defaults or validation
+// override it. It lets a plain BaseAgentConfig satisfy AgentConfig.
+func (c *BaseAgentConfig) Validate() error { return nil }
 
 // BaseAgentConfig holds the configuration fields shared by every backend's
 // AgentConfig. Embed it in a concrete config; it implements every AgentConfig
