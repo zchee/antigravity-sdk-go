@@ -57,3 +57,7 @@ bench.txt
 
 # profile
 *.pprof
+
+# omc
+.claude/scheduled_tasks.lock
+.sisyphus/
