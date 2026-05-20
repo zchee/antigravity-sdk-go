@@ -329,6 +329,9 @@ func ptrInt32(v int32) *int {
 // stepTracker tracks the wire state and handled requests for one trajectory
 // step, preventing duplicate handling of confirmation/question requests that
 // the harness rebroadcasts while waiting for the user.
+//
+// A stepTracker is NOT safe for concurrent use; the LocalConnection accesses
+// every tracker only while holding its mutex.
 type stepTracker struct {
 	state           pb.StepUpdate_State
 	handledRequests map[string]struct{}

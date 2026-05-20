@@ -38,7 +38,7 @@ type ToolOutput interface {
 
 // RunCommandResult is the structured result of a run_command execution.
 type RunCommandResult struct {
-	Output string
+	Output string `json:"output"`
 }
 
 func (RunCommandResult) isToolOutput()    {}
@@ -46,14 +46,14 @@ func (r RunCommandResult) String() string { return r.Output }
 
 // ListDirectoryEntry is a single entry in a directory listing.
 type ListDirectoryEntry struct {
-	Name        string
-	IsDirectory bool
-	FileSize    int64
+	Name        string `json:"name"`
+	IsDirectory bool   `json:"is_directory"`
+	FileSize    int64  `json:"file_size"`
 }
 
 // ListDirectoryResult is the structured result of a list_directory execution.
 type ListDirectoryResult struct {
-	Entries []ListDirectoryEntry
+	Entries []ListDirectoryEntry `json:"entries"`
 }
 
 func (ListDirectoryResult) isToolOutput() {}
@@ -78,7 +78,7 @@ func (r ListDirectoryResult) String() string {
 // SearchDirectoryResult is the structured result of a search_directory
 // execution.
 type SearchDirectoryResult struct {
-	NumResults int
+	NumResults int `json:"num_results"`
 }
 
 func (SearchDirectoryResult) isToolOutput()    {}
@@ -86,7 +86,7 @@ func (r SearchDirectoryResult) String() string { return fmt.Sprintf("%d results"
 
 // FindFileResult is the structured result of a find_file execution.
 type FindFileResult struct {
-	Output string
+	Output string `json:"output"`
 }
 
 func (FindFileResult) isToolOutput()    {}
@@ -94,7 +94,7 @@ func (r FindFileResult) String() string { return r.Output }
 
 // EditFileResult is the structured result of an edit_file execution.
 type EditFileResult struct {
-	Summary string
+	Summary string `json:"summary"`
 }
 
 func (EditFileResult) isToolOutput()    {}
@@ -102,7 +102,7 @@ func (r EditFileResult) String() string { return r.Summary }
 
 // GenerateImageResult is the structured result of a generate_image execution.
 type GenerateImageResult struct {
-	ImageName string
+	ImageName string `json:"image_name"`
 }
 
 func (GenerateImageResult) isToolOutput()    {}
@@ -111,7 +111,7 @@ func (r GenerateImageResult) String() string { return r.ImageName }
 // TextResult is the generic fallback for tools without a structured output
 // (e.g. view_file).
 type TextResult struct {
-	Text string
+	Text string `json:"text"`
 }
 
 func (TextResult) isToolOutput()    {}
