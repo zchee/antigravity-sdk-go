@@ -53,25 +53,13 @@ func (t Text) isStreamChunk() {}
 // Index returns the step index this chunk belongs to.
 func (t Text) Index() int { return t.StepIndex }
 
-// ChatResponse is the turn response from an Agent chat call: a stream of
-// semantic chunks with lazy buffering, exposing independent cursors over a
-// shared buffer.
+// ChatChunk is a single real-time event in a chat stream: either a StreamChunk
+// (Thought or Text) or a ToolCall.
 //
-// NOTE: this is a declaration-only placeholder for Phase 2 of the port. The
-// multiple-independent-cursor buffering, error fan-out, and the Chunks /
-// Thoughts / ToolCalls / Text / Resolve / StructuredOutput / UsageMetadata
-// surface are implemented in Phase 6, where the concurrency contract is
-// designed in isolation. The fields and methods here are intentionally minimal
-// so that downstream packages can name the type without depending on the final
-// streaming implementation.
-type ChatResponse struct {
-	// _ prevents a meaningful zero value: a ChatResponse is constructed by the
-	// SDK, not by callers. Real fields (shared buffer, cursors, error state) are
-	// added in Phase 6.
-	_ noCopy
-}
-
-// noCopy is a zero-width marker preventing useful zero-value construction and
-// signaling that the type must not be copied once the Phase 6 implementation
-// adds synchronization. It has no behavior on its own.
-type noCopy struct{}
+// Upstream models this as the union StreamChunk | ToolCall. ToolCall is
+// identity-keyed (by ID) and carries no step index, so it is not a StreamChunk;
+// Go cannot express a closed union over an interface and a struct, so ChatChunk
+// is an alias for any. A consumer type-switches on StreamChunk vs ToolCall. The
+// streaming ChatResponse that buffers these lives in the root antigravity
+// package, which holds the back-reference to the Conversation it reads from.
+type ChatChunk = any
