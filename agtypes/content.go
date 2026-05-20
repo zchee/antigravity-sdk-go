@@ -88,6 +88,23 @@ type Media interface {
 	Desc() string
 }
 
+// ContentPrimitive is a single unit of agent input: either a string (plain
+// text) or a Media value (Image, Document, Audio, Video).
+//
+// Upstream models this as the union str | Image | Document | Audio | Video.
+// Go has no closed union over a builtin and an interface, so ContentPrimitive
+// is an alias for any; callers must supply a string or a Media. The connection
+// layer validates the dynamic type when translating to the wire.
+type ContentPrimitive = any
+
+// Content is agent input: a single ContentPrimitive (a string or a Media), or a
+// slice of ContentPrimitive values for multimodal input.
+//
+// Upstream models this as ContentPrimitive | list[ContentPrimitive]. As with
+// ContentPrimitive, Go cannot express the closed union, so Content is an alias
+// for any; supply a string, a Media, or a []ContentPrimitive.
+type Content = any
+
 // baseMedia is the common fields for every media primitive.
 type baseMedia struct {
 	// Data is the raw media bytes.
