@@ -241,9 +241,12 @@ func (c *LocalConnection) handleTrajectoryStateUpdate(tsu *pb.TrajectoryStateUpd
 			delete(c.activeSubagents, trajID)
 			response := c.subagentResponses[trajID]
 			delete(c.subagentResponses, trajID)
-			turnCtx := c.turnContext()
-			c.mu.Unlock()
+			// Compute the turn context only when there is a hook runner to
+			// dispatch through; turnContext panics on a nil runner because it
+			// reads runner.SessionContext.
 			if c.hookRunner != nil {
+				turnCtx := c.turnContext()
+				c.mu.Unlock()
 				opCtx := hook.NewOperationContext(turnCtx)
 				result := response
 				if result == "" {
@@ -253,8 +256,8 @@ func (c *LocalConnection) handleTrajectoryStateUpdate(tsu *pb.TrajectoryStateUpd
 				if err := c.hookRunner.DispatchPostToolCall(c.readerCtx, opCtx, tr); err != nil {
 					slog.Error("subagent post-tool-call hook error", "err", err)
 				}
+				c.mu.Lock()
 			}
-			c.mu.Lock()
 		} else {
 			c.parentIdle = true
 		}

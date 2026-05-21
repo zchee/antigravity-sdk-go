@@ -72,10 +72,21 @@ type stepOrErr struct {
 // runs in its own goroutine, feeding a buffered step channel that ReceiveSteps
 // ranges over. Hook dispatches that may block (interaction, confirmation) run
 // in their own goroutines tracked by bgWG.
+// wsConn is the narrow websocket surface LocalConnection depends on. The real
+// *websocket.Conn satisfies it structurally (see the compile-time assertion
+// below); tests inject a fake to exercise the reader loop in-process.
+type wsConn interface {
+	Read(ctx context.Context) (websocket.MessageType, []byte, error)
+	Write(ctx context.Context, typ websocket.MessageType, data []byte) error
+	Close(code websocket.StatusCode, reason string) error
+}
+
+var _ wsConn = (*websocket.Conn)(nil)
+
 type LocalConnection struct {
 	connection.BaseConnection
 
-	ws         *websocket.Conn
+	ws         wsConn
 	cmd        *exec.Cmd
 	stdin      io.WriteCloser
 	toolRunner *tool.Runner
@@ -114,7 +125,7 @@ type LocalConnection struct {
 // newLocalConnection wires a connection around an established websocket and the
 // spawned process, and starts the reader loop. stderr captures the harness's
 // recent stderr for diagnostics.
-func newLocalConnection(ws *websocket.Conn, cmd *exec.Cmd, stdin io.WriteCloser, tr *tool.Runner, hr *hook.Runner, stderr *stderrBuffer) *LocalConnection {
+func newLocalConnection(ws wsConn, cmd *exec.Cmd, stdin io.WriteCloser, tr *tool.Runner, hr *hook.Runner, stderr *stderrBuffer) *LocalConnection {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &LocalConnection{
 		ws:                ws,
@@ -299,10 +310,20 @@ func (c *LocalConnection) ReceiveSteps(ctx context.Context) iter.Seq2[agtypes.St
 			if c.IsIdle() && len(c.stepCh) == 0 {
 				return
 			}
+			// Snapshot idleCh under its mutex; setIdle(true) closes the channel
+			// we capture here so a select waking on it lets us re-check
+			// IsIdle+empty and terminate. Without this case, the loop would
+			// block on stepCh after the last step was yielded.
+			c.idleMu.Lock()
+			idleCh := c.idleCh
+			c.idleMu.Unlock()
 			select {
 			case <-ctx.Done():
 				yield(agtypes.Step{}, ctx.Err())
 				return
+			case <-idleCh:
+				// Loop back to the top idle+empty check.
+				continue
 			case item, ok := <-c.stepCh:
 				if !ok {
 					return

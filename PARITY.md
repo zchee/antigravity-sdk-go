@@ -326,13 +326,27 @@ Python `__all__`:
     to derive a schema. Go tools are always `tool.ToolWithSchema` carrying an
     explicit schema, so the introspection path is dead weight in Go and the
     `google.golang.org/genai` dependency is not pulled in here.
-15. **Synthetic wire-test fixtures.** The `localharness` binary is a vendored
-    pre-compiled artifact not in the upstream repo; we did not have one
-    during the port. Wire-shape unit tests in `connection/local/*_test.go`
-    are built from generated proto builders, verifying structural correctness
-    rather than ground-truth wire fidelity. `connection/local/integration_test.go`
-    is the only ground-truth test; it is gated on `ANTIGRAVITY_HARNESS_PATH`
-    or a `localharness` binary on `$PATH` (plus `GEMINI_API_KEY`).
+15. **Wire-fidelity testing.** The `localharness` binary is a vendored
+    pre-compiled artifact not in the upstream repo, and we did not have one
+    during the port. Wire-shape coverage is split across three layers:
+    - **Unit tests** (`connection/local/*_test.go`) build proto fixtures from
+      the generated builders and exercise pure logic (`stepFromUpdate`,
+      `extractToolResult`, `stepTracker`, framing, policy/question handlers).
+    - **In-process integration tests** (`connection/local/wire_test.go`) drive
+      the real reader loop end-to-end over a `fakeWS` that shuttles protojson
+      bytes between the SDK and a simulated harness, covering the upstream
+      `test_utils.py` / `local_connection_test.py` integration scenarios
+      (step routing, tool_confirmation flow with pending-builtin tracking,
+      questions_request, wait-state dedup + state-transition reset, subagent
+      parent/child idle accounting, host tool_call execution, file:// URI
+      normalization). The fake shares the production protojson encoder, so
+      the wire format under test is the wire format the binary speaks.
+    - **Ground-truth integration** (`connection/local/integration_test.go`)
+      is the only test that spawns the real harness. It is gated on
+      `ANTIGRAVITY_HARNESS_PATH` or a `localharness` binary on `$PATH` (plus
+      `GEMINI_API_KEY`) and skips otherwise. This is the remaining gap: when
+      a binary is available, run this test to catch any drift between the
+      port's protojson encoding and the harness's actual wire shape.
 
 ## Renames
 
