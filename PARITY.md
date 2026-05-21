@@ -180,7 +180,7 @@ Python `__all__`:
 | `runner.process_tool_calls(calls)`    | `ProcessToolCalls(ctx, calls)` (concurrent via `wg.Go`) | |
 | `runner.set_context(tc)`              | `SetContext(*ToolContext)`                  | |
 | `ToolWithSchema`                      | `ToolWithSchema{Name, Description, Fn, InputSchema}` + `AddTool` | `Name`/`Description` explicit (upstream used `__name__`/`__doc__`) |
-| `Tool = Callable[..., Any]`           | `type Tool func(ctx, map[string]any) (any, error)` | |
+| `Tool = Callable[..., Any]`           | `type Tool func(ctx, map[string]any) (any, error)`; `tool.Typed[Args]` adapts typed `func(ctx, Args) (any, error)` to this shape with a derived schema | see §13 for the typed-function helpers |
 | Python `get_public_callable` (signature stripping) | **dropped** — Go tools take an explicit args map, so there is no hidden ToolContext parameter to strip | gap §8 |
 
 ### `google.antigravity.triggers.triggers` → `trigger/`
@@ -205,7 +205,7 @@ Python `__all__`:
 | Python                                | Go (`trigger.*`)                            | Notes |
 |---------------------------------------|---------------------------------------------|-------|
 | `every(interval, callback)`           | `Every(interval, callback) Trigger`         | panics on non-positive interval |
-| `on_file_change(path, callback)`      | `OnFileChange(path, callback) Trigger`      | Uses `github.com/fswatcher/fswatcher` (user-selected; non-recursive — gap §9). |
+| `on_file_change(path, callback)`      | `OnFileChange(path, callback) Trigger`      | Uses `github.com/fswatcher/fswatcher` (user-selected); recursive, matching upstream `watchfiles.awatch`. |
 
 ### `google.antigravity.mcp.bridge` → `mcp/`
 
@@ -215,7 +215,7 @@ Python `__all__`:
 | `bridge.connect(server_config)`       | `Connect(ctx, agtypes.McpServerConfig) error` | type-switches the sum type instead of reading `MCPType()` |
 | `bridge.tools`                        | `Tools() []tool.ToolWithSchema`             | returns a copy |
 | `bridge.stop()`                       | `Stop() error`                              | first close error wins |
-| `get_mcp_tools(servers)` helper       | **inlined** as the unexported `toolsFromSession` — gap §10 |
+| `get_mcp_tools(servers)` helper       | **inlined** as the unexported `toolsFromSession` — gap §9 |
 
 ### `google.antigravity.connections.connection` → `connection/`
 
@@ -224,7 +224,7 @@ Python `__all__`:
 | `AgentConfig` Pydantic model + `create_strategy` abstract method | `AgentConfig` interface (`CreateStrategy` + getters + setters + `Clone` + `Validate`) backed by embeddable `BaseAgentConfig` | The interface exposes the shared fields as methods. |
 | `Connection` abstract class (default no-op methods) | `Connection` interface (every method) + `BaseConnection` struct providing no-op defaults for everything except `Send`/`ReceiveSteps`/`SendTriggerNotification` | |
 | `ConnectionStrategy` async ctx mgr (`__aenter__` / `connect` / `__aexit__`) | `ConnectionStrategy` interface (`Start(ctx)` / `Connect() (Connection, error)` / `Close(ctx)`) + `ErrNotStarted` | |
-| response_schema normalizer (dict/BaseModel/str → str) | `MarshalResponseSchema(any) (string, error)` | Pydantic.BaseModel branch dropped — gap §11 |
+| response_schema normalizer (dict/BaseModel/str → str) | `MarshalResponseSchema(any) (string, error)` | Pydantic.BaseModel branch dropped — gap §10 |
 | test fakes                            | `FakeConnection` / `FakeStrategy` / `FakeConfig` (in `fake.go`, reusable by downstream tests) | non-test file by design |
 
 ### `google.antigravity.connections.local.local_connection` → `connection/local/`
@@ -233,12 +233,12 @@ Python `__all__`:
 |---------------------------------------|---------------------------------------------|-------|
 | `LocalConnection(process, ws, ...)`   | `LocalConnection` (embeds `connection.BaseConnection`) | constructed by `Strategy.Start` |
 | `LocalConnectionStrategy(...)`        | `Strategy` + `StrategyConfig`               | `NewStrategy(cfg)` |
-| `LocalConnectionStep` (extends Step)  | **dropped as a type** — extras (`cascade_id`/`trajectory_id`/`target`/`http_code`) carried in `Step.Extra` (Phase 2 design) | gap §12 |
+| `LocalConnectionStep` (extends Step)  | **dropped as a type** — extras (`cascade_id`/`trajectory_id`/`target`/`http_code`) carried in `Step.Extra` (Phase 2 design) | gap §11 |
 | `normalize_wire_path`                 | `normalizeWirePath` (unexported)            | |
 | `_extract_tool_result`                | `extractToolResult` (unexported) + `ToolOutput` interface |
 | `_StepTracker`                        | `stepTracker` (unexported)                  | invariant: accessed only under the connection's mutex |
-| `_get_default_binary_path` (env → resource → PATH) | `resolveBinaryPath` (env → PATH) + `HarnessPathEnv` + `ErrBinaryNotFound` | the Python package-resource branch has no Go analog — gap §13 |
-| `callable_to_tool_proto`              | `toolProto` (unexported)                    | the genai `FunctionDeclaration` introspection branch dropped — gap §14 |
+| `_get_default_binary_path` (env → resource → PATH) | `AgentConfig.HarnessProvider` ∘ `AgentConfig.HarnessPath` → `HarnessPathEnv` → PATH; `ErrBinaryNotFound` on miss | the Python package-resource branch becomes the user-supplied `HarnessProvider` extension point — see §12 |
+| `callable_to_tool_proto`              | `toolProto` (unexported) + `tool.Typed`/`tool.SchemaFor` for opt-in typed registration | replaces the `genai.FunctionDeclaration` introspection branch — see §13 |
 
 ### `google.antigravity.connections.local.local_connection_config` → `connection/local/`
 
@@ -295,40 +295,61 @@ Python `__all__`:
    by dynamic type. Behaviorally equivalent, simpler.
 7. **`Predicate` always receives the full `ToolCall`.** Python inspected the
    predicate's first-parameter annotation to choose between passing args-dict,
-   a typed Pydantic model, or the `ToolCall`. Go has no equivalent reflection;
-   predicates read `tc.Args` themselves. Documented.
+   a typed Pydantic model, or the `ToolCall`. Go signatures are not introspected
+   at runtime for dispatch — predicates read `tc.Args` themselves. For tools
+   that want a typed-args ergonomic, see §13 (`tool.Typed`).
 8. **`ToolContext` injection via `context.Context`, not signature inspection.**
-   Python found a `ToolContext`-typed parameter and bound it; Go has no
-   runtime parameter binding. `tool.Runner.Execute` calls `tool.WithToolContext(ctx, tc)`;
-   a tool retrieves it via `tool.FromContext(ctx)`. This is also why
-   `get_public_callable` (schema stripping for the hidden parameter) is not
-   needed in Go.
-9. **`OnFileChange` is non-recursive.** Python's `watchfiles.awatch`
-   recurses; the Go `fswatcher` `Watcher.Add` watches direct entries only.
-   Documented on the godoc as a deliberate divergence; users needing recursion
-   can walk and add themselves.
-10. **`get_mcp_tools` helper inlined.** The Python free function added no
-    capability beyond `Bridge.Tools()`; folded into the bridge.
-11. **`MarshalResponseSchema` drops the Pydantic.BaseModel branch.** No Go
+   Python found a `ToolContext`-typed parameter and bound it; Go does not bind
+   parameters by type at runtime. `tool.Runner.Execute` calls
+   `tool.WithToolContext(ctx, tc)`; a tool retrieves it via
+   `tool.FromContext(ctx)`. This is also why `get_public_callable` (schema
+   stripping for the hidden parameter) is not needed in Go. The `tool.Typed`
+   helper (§13) preserves the same `ctx`-only convention.
+9. **`get_mcp_tools` helper inlined.** The Python free function added no
+   capability beyond `Bridge.Tools()`; folded into the bridge.
+10. **`MarshalResponseSchema` drops the Pydantic.BaseModel branch.** No Go
     equivalent of subclassing a serializer model. Accepts a JSON string
     (validated) or any value that marshals to JSON.
-12. **`LocalConnectionStep` collapsed into `Step.Extra`.** The
+11. **`LocalConnectionStep` collapsed into `Step.Extra`.** The
     extension fields (`cascade_id`, `trajectory_id`, `target`, `http_code`)
     are carried in `Step.Extra` (the Phase 2 design provided for this), so
     `Connection.ReceiveSteps` returns `iter.Seq2[agtypes.Step, error]`
     without a connection-specific subtype.
-13. **Binary resolution drops the package-resource branch.** Python's
-    `importlib.resources.files("google.antigravity")/"bin/localharness"` has
-    no Go analog (Go has no concept of bundling per-platform binaries in a
-    module). Resolution order is env → PATH only.
-14. **`callable_to_tool_proto` drops the genai introspection path.** Upstream
-    fed a bare callable through `genai.FunctionDeclaration.from_callable_with_api_option`
-    to derive a schema. Go tools are always `tool.ToolWithSchema` carrying an
-    explicit schema, so the introspection path is dead weight in Go and the
-    `google.golang.org/genai` dependency is not pulled in here.
-15. **Wire-fidelity testing.** The `localharness` binary is a vendored
-    pre-compiled artifact not in the upstream repo, and we did not have one
-    during the port. Wire-shape coverage is split across three layers:
+12. **Binary resolution: package-resource branch becomes the `HarnessProvider`
+    extension point.** Python embedded a per-platform binary inside the wheel
+    and resolved it via `importlib.resources.files("google.antigravity")/"bin/localharness"`.
+    Go has no native equivalent (a `go install`-built binary cannot carry
+    arbitrary platform-specific assets), so the SDK does not bundle the
+    harness itself; instead it exposes two extension points on
+    `local.AgentConfig`:
+    - `HarnessPath string` — explicit path, overrides env and PATH.
+    - `HarnessProvider func(ctx) (path string, cleanup func(), err error)` —
+      callback that yields a path (typically by writing an `//go:embed`-bundled
+      binary to a tempfile) and a cleanup that runs on `Strategy.Close`.
+    Resolution order is `HarnessProvider` → `HarnessPath` → `ANTIGRAVITY_HARNESS_PATH` → `localharness` on PATH.
+    See `examples/embeddedharness/` for the embed pattern. Closes the
+    distribution gap without forcing a binary into this module.
+13. **`callable_to_tool_proto`: typed-function path via `tool.Typed`, not
+    `genai.FunctionDeclaration`.** Upstream fed a bare callable through
+    `genai.FunctionDeclaration.from_callable_with_api_option` to derive a
+    schema, pulling in `google.golang.org/genai`. The Go port keeps tools
+    explicitly schemaful (`tool.ToolWithSchema` always carries `InputSchema`),
+    but offers an opt-in helper for callers who want to declare a typed
+    function and have the schema inferred:
+    - `tool.SchemaFor[T any]() (map[string]any, error)` — derives a JSON
+      Schema from any struct type via `jsonschema-go`.
+    - `tool.Typed[Args any](name, desc, fn) (ToolWithSchema, error)` — wraps
+      `func(ctx, Args) (any, error)`, attaches the derived schema, and
+      decodes incoming `map[string]any` into `Args` via JSON round-trip;
+      decode failures surface as `*tool.ErrToolArgsInvalid` (matchable with
+      `errors.Is(err, tool.ErrTypedArgs)`).
+    The schema is built from the existing `jsonschema-go` (already an MCP SDK
+    transitive dep — no new external dependency); `google.golang.org/genai`
+    is still not pulled in. Tools that decode the args map directly remain
+    fully supported.
+14. **Wire-fidelity testing.** The `localharness` binary is a vendored
+    pre-compiled artifact not in the upstream repo. Wire-shape coverage is
+    split across three layers:
     - **Unit tests** (`connection/local/*_test.go`) build proto fixtures from
       the generated builders and exercise pure logic (`stepFromUpdate`,
       `extractToolResult`, `stepTracker`, framing, policy/question handlers).
@@ -342,11 +363,12 @@ Python `__all__`:
       normalization). The fake shares the production protojson encoder, so
       the wire format under test is the wire format the binary speaks.
     - **Ground-truth integration** (`connection/local/integration_test.go`)
-      is the only test that spawns the real harness. It is gated on
-      `ANTIGRAVITY_HARNESS_PATH` or a `localharness` binary on `$PATH` (plus
-      `GEMINI_API_KEY`) and skips otherwise. This is the remaining gap: when
-      a binary is available, run this test to catch any drift between the
-      port's protojson encoding and the harness's actual wire shape.
+      spawns the real harness. It is gated on `ANTIGRAVITY_HARNESS_PATH` or
+      a `localharness` binary on `$PATH` (plus `GEMINI_API_KEY`) and skips
+      otherwise. Verified against `google-antigravity 0.1.0`'s bundled
+      `bin/localharness`: `TestIntegrationHelloWorld` PASS — the Go protojson
+      encoding round-trips against the real binary's wire shape. Re-run on
+      every upstream wheel bump to catch drift.
 
 ## Renames
 
@@ -361,8 +383,6 @@ Python `__all__`:
 
 ## What's NOT in the Go port (intentional)
 
-- The genai `FunctionDeclaration` introspection path (see gap §14).
-- The `importlib.resources` binary lookup (see gap §13).
 - The `_upgrade_to_interactive_confirmation` private-state hack (see gap §1).
 - Pydantic-specific machinery: `from_pydantic`, `BeforeValidator` coercion,
   `model_validator` reflection — all replaced with explicit constructors,
