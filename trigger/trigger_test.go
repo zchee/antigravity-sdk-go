@@ -138,6 +138,105 @@ func TestOnFileChange(t *testing.T) {
 	}
 }
 
+// TestOnFileChangeRecursive verifies that OnFileChange picks up writes inside a
+// directory created *after* the trigger started — the case Python's
+// watchfiles.awatch covers natively and the original non-recursive Add did not.
+// On linux/freebsd this exercises fswatcher's synthesized-Create handling for
+// nested mkdirs the kernel does not report.
+func TestOnFileChangeRecursive(t *testing.T) {
+	dir := t.TempDir()
+	got := make(chan agtypes.FileChange, 32)
+	tr := trigger.OnFileChange(dir, func(_ context.Context, _ *trigger.Context, c []agtypes.FileChange) error {
+		for _, ch := range c {
+			select {
+			case got <- ch:
+			default:
+			}
+		}
+		return nil
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = tr(ctx, trigger.NewContext(&fakeConn{})) }()
+
+	time.Sleep(50 * time.Millisecond)
+
+	nested := filepath.Join(dir, "a", "b", "c")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Pause so the watcher picks up the new subtree before the file write.
+	time.Sleep(100 * time.Millisecond)
+	target := filepath.Join(nested, "deep.txt")
+	if err := os.WriteFile(target, []byte("nested"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// fswatcher canonicalizes via EvalSymlinks (e.g. /var → /private/var on
+	// macOS), so resolve the target the same way before comparing.
+	wantPath, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ch := <-got:
+			if ch.Path == wantPath {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no event for nested file %q", wantPath)
+		}
+	}
+}
+
+// TestOnFileChangeSingleFile verifies that watching a single file path still
+// works after the switch from Add to AddRecursive — fswatcher accepts a file
+// as a recursive-root argument and reports modifications to it.
+func TestOnFileChangeSingleFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "watched.txt")
+	if err := os.WriteFile(target, []byte("v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := make(chan agtypes.FileChange, 8)
+	tr := trigger.OnFileChange(target, func(_ context.Context, _ *trigger.Context, c []agtypes.FileChange) error {
+		for _, ch := range c {
+			select {
+			case got <- ch:
+			default:
+			}
+		}
+		return nil
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = tr(ctx, trigger.NewContext(&fakeConn{})) }()
+
+	time.Sleep(50 * time.Millisecond)
+	if err := os.WriteFile(target, []byte("v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantPath, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ch := <-got:
+			if ch.Path == wantPath {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no event for watched file %q", wantPath)
+		}
+	}
+}
+
 func TestRunnerLifecycle(t *testing.T) {
 	r := trigger.NewRunner(&fakeConn{})
 	var started atomic.Int64

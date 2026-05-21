@@ -63,15 +63,15 @@ func fswatcherToKind(op fswatcher.Op) agtypes.FileChangeKind {
 	}
 }
 
-// OnFileChange returns a Trigger that invokes callback whenever the file or
-// directory at path changes. Raw filesystem events are converted to
+// OnFileChange returns a Trigger that invokes callback whenever path or
+// anything beneath it changes. Raw filesystem events are converted to
 // agtypes.FileChange values before being passed to the callback. The trigger
 // runs until its context is cancelled.
 //
-// Unlike the upstream lazily-imported watchfiles dependency, file watching is
-// provided by fswatcher and is always available. The watcher observes the given
-// path's direct entries; pass a directory to observe its children, or a file to
-// observe that file.
+// File watching is provided by fswatcher, which is always available (unlike
+// the upstream lazily-imported watchfiles dependency). Pass a directory to
+// observe the whole subtree — subdirectories created after registration are
+// picked up automatically — or pass a file to observe just that file.
 func OnFileChange(path string, callback func(ctx context.Context, tc *Context, changes []agtypes.FileChange) error) Trigger {
 	return func(ctx context.Context, tc *Context) error {
 		w, err := fswatcher.NewWatcher()
@@ -79,7 +79,7 @@ func OnFileChange(path string, callback func(ctx context.Context, tc *Context, c
 			return fmt.Errorf("trigger: create file watcher: %w", err)
 		}
 		defer w.Close()
-		if err := w.Add(path, fswatcher.All); err != nil {
+		if err := w.AddRecursive(path, fswatcher.All); err != nil {
 			return fmt.Errorf("trigger: watch %q: %w", path, err)
 		}
 		for {
