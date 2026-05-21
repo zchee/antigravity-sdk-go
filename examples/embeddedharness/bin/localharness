@@ -1,0 +1,5 @@
+#!/bin/sh
+# Placeholder: replace this file with the real localharness binary for your
+# target platform before building. See bin/README.md.
+echo "embeddedharness example: replace bin/localharness with a real binary" 1>&2
+exit 127
