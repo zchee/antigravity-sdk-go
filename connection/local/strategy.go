@@ -45,6 +45,16 @@ type StrategyConfig struct {
 	Workspaces         []string
 	AppDataDir         string
 	SkillsPaths        []string
+
+	// HarnessPath, when non-empty, is the explicit path to the localharness
+	// binary; it overrides $ANTIGRAVITY_HARNESS_PATH and any PATH lookup but is
+	// itself overridden by HarnessProvider.
+	HarnessPath string
+	// HarnessProvider, when non-nil, supplies the localharness binary path
+	// (typically by writing an embedded binary to a tempfile). Its cleanup is
+	// run on Strategy.Close. When set, it takes precedence over every other
+	// resolution source.
+	HarnessProvider HarnessProvider
 }
 
 // Strategy establishes a LocalConnection: it resolves and spawns the
@@ -52,9 +62,10 @@ type StrategyConfig struct {
 // websocket port, connects, and sends the initialize event. It implements
 // connection.ConnectionStrategy.
 type Strategy struct {
-	cfg        StrategyConfig
-	binaryPath string
-	conn       *LocalConnection
+	cfg            StrategyConfig
+	binaryPath     string
+	harnessCleanup func()
+	conn           *LocalConnection
 }
 
 // NewStrategy returns a Strategy for the given configuration. Workspaces are
@@ -90,7 +101,7 @@ func (s *Strategy) Start(ctx context.Context) error {
 		return &agtypes.ValidationError{Message: "a Gemini API key is required: set GeminiConfig.APIKey or $GEMINI_API_KEY"}
 	}
 
-	binaryPath, err := resolveBinaryPath()
+	binaryPath, err := s.resolveHarness(ctx)
 	if err != nil {
 		return err
 	}
@@ -197,12 +208,45 @@ func (s *Strategy) Connect() (connection.Connection, error) {
 	return s.conn, nil
 }
 
-// Close tears down the connection if one was established.
+// Close tears down the connection if one was established, and runs any cleanup
+// the HarnessProvider returned (e.g. removing an extracted tempfile). The
+// provider cleanup runs even if no connection was established, and even if
+// Disconnect fails.
 func (s *Strategy) Close(ctx context.Context) error {
-	if s.conn == nil {
-		return nil
+	var err error
+	if s.conn != nil {
+		err = s.conn.Disconnect(ctx)
 	}
-	return s.conn.Disconnect(ctx)
+	if s.harnessCleanup != nil {
+		cleanup := s.harnessCleanup
+		s.harnessCleanup = nil
+		cleanup()
+	}
+	return err
+}
+
+// resolveHarness yields a path to the localharness binary, honoring the
+// resolution order documented on HarnessProvider/HarnessPath. When the
+// provider is used, its cleanup is recorded so Close runs it.
+func (s *Strategy) resolveHarness(ctx context.Context) (string, error) {
+	if s.cfg.HarnessProvider != nil {
+		path, cleanup, err := s.cfg.HarnessProvider(ctx)
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return "", fmt.Errorf("local: harness provider: %w", err)
+		}
+		if path == "" {
+			if cleanup != nil {
+				cleanup()
+			}
+			return "", fmt.Errorf("local: harness provider returned empty path")
+		}
+		s.harnessCleanup = cleanup
+		return path, nil
+	}
+	return resolveBinaryPath(s.cfg.HarnessPath)
 }
 
 // effectiveAPIKey returns the per-default-model key if set, else the shared key.

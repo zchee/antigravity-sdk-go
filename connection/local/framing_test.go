@@ -60,7 +60,7 @@ func TestReadFrameTruncated(t *testing.T) {
 
 func TestResolveBinaryPathEnv(t *testing.T) {
 	t.Setenv(HarnessPathEnv, "/custom/localharness")
-	got, err := resolveBinaryPath()
+	got, err := resolveBinaryPath("")
 	if err != nil {
 		t.Fatalf("resolveBinaryPath: %v", err)
 	}
@@ -69,10 +69,21 @@ func TestResolveBinaryPathEnv(t *testing.T) {
 	}
 }
 
+func TestResolveBinaryPathExplicitBeatsEnv(t *testing.T) {
+	t.Setenv(HarnessPathEnv, "/from/env")
+	got, err := resolveBinaryPath("/from/field")
+	if err != nil {
+		t.Fatalf("resolveBinaryPath: %v", err)
+	}
+	if got != "/from/field" {
+		t.Errorf("resolveBinaryPath = %q, want /from/field", got)
+	}
+}
+
 func TestResolveBinaryPathNotFound(t *testing.T) {
 	t.Setenv(HarnessPathEnv, "")
-	t.Setenv("PATH", t.TempDir()) // a PATH with no localharness
-	if _, err := resolveBinaryPath(); err == nil {
+	t.Setenv("PATH", t.TempDir())
+	if _, err := resolveBinaryPath(""); err == nil {
 		t.Error("resolveBinaryPath with no binary = nil error, want ErrBinaryNotFound")
 	}
 }

@@ -15,6 +15,7 @@
 package local
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -26,17 +27,33 @@ const HarnessPathEnv = "ANTIGRAVITY_HARNESS_PATH"
 
 // ErrBinaryNotFound reports that the localharness binary could not be located.
 var ErrBinaryNotFound = errors.New("local: could not find the localharness binary; " +
-	"set " + HarnessPathEnv + " or ensure 'localharness' is on PATH")
+	"set " + HarnessPathEnv + ", AgentConfig.HarnessPath, AgentConfig.HarnessProvider, " +
+	"or ensure 'localharness' is on PATH")
 
-// resolveBinaryPath locates the localharness binary, mirroring the upstream
-// resolution order minus the Python-package-resource branch (which has no Go
-// analog):
+// HarnessProvider yields the path to a localharness binary, optionally backed
+// by an extracted asset. It is the extension point downstream uses to ship the
+// harness inside a Go binary via //go:embed: the provider writes the embedded
+// bytes to a tempfile, returns the path, and returns a cleanup that removes
+// the tempfile when the Strategy closes.
 //
-//  1. the ANTIGRAVITY_HARNESS_PATH environment variable, if set;
-//  2. a "localharness" executable on PATH.
+// cleanup may be nil if there is nothing to release. It is called exactly once,
+// during Strategy.Close, regardless of whether Start succeeded after the
+// provider returned.
+type HarnessProvider func(ctx context.Context) (path string, cleanup func(), err error)
+
+// resolveBinaryPath locates the localharness binary by checking, in order:
 //
-// It returns ErrBinaryNotFound if neither yields a usable path.
-func resolveBinaryPath() (string, error) {
+//  1. an explicit path supplied by the caller (AgentConfig.HarnessPath);
+//  2. the ANTIGRAVITY_HARNESS_PATH environment variable;
+//  3. a "localharness" executable on PATH.
+//
+// HarnessProvider is handled separately by Strategy.Start (because it produces
+// a cleanup callback and needs a context). It returns ErrBinaryNotFound if
+// none of the static sources yields a usable path.
+func resolveBinaryPath(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
 	if env := os.Getenv(HarnessPathEnv); env != "" {
 		return env, nil
 	}

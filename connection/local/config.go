@@ -47,6 +47,16 @@ type AgentConfig struct {
 	// APIKey is a shorthand for GeminiConfig.APIKey; setting both is an error.
 	APIKey string
 
+	// HarnessPath, when non-empty, is the explicit path to the localharness
+	// binary. It overrides $ANTIGRAVITY_HARNESS_PATH and any PATH lookup, but
+	// is itself overridden by HarnessProvider.
+	HarnessPath string
+	// HarnessProvider, when non-nil, supplies the localharness binary path —
+	// typically by writing an embedded binary to a tempfile. It is the
+	// extension point downstream uses to ship the harness inside a Go binary
+	// via //go:embed. See HarnessProvider for the contract.
+	HarnessProvider HarnessProvider
+
 	// validated guards Validate against re-applying defaults (notably the
 	// workspace policy prepend) so it is idempotent.
 	validated bool
@@ -190,6 +200,8 @@ func (c *AgentConfig) CreateStrategy(toolRunner *tool.Runner, hookRunner *hook.R
 		Workspaces:         c.WorkspacesValue,
 		AppDataDir:         c.AppDataDirValue,
 		SkillsPaths:        c.SkillsPathsValue,
+		HarnessPath:        c.HarnessPath,
+		HarnessProvider:    c.HarnessProvider,
 	}), nil
 }
 
@@ -202,6 +214,8 @@ func (c *AgentConfig) Clone() connection.AgentConfig {
 		GeminiConfig:    c.GeminiConfig,
 		Model:           c.Model,
 		APIKey:          c.APIKey,
+		HarnessPath:     c.HarnessPath,
+		HarnessProvider: c.HarnessProvider,
 		// Carry the validated flag so a clone of an already-validated config does
 		// not re-prepend workspace policies.
 		validated: c.validated,
